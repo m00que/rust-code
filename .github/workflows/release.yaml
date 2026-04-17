@@ -1,0 +1,82 @@
+name: Release Build
+
+# 当推送到符合 v* 格式的 tag 时触发，例如 git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-upload:
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # 即使某个平台编译失败，也不要取消其他平台的编译
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: dongming-zhijing
+            asset_name: dongming-zhijing-linux-amd64
+          
+          # Windows x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: dongming-zhijing.exe
+            asset_name: dongming-zhijing-windows-amd64.exe
+          
+          # macOS Intel
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: dongming-zhijing
+            asset_name: dongming-zhijing-macos-intel
+            
+          # macOS Apple Silicon (M1/M2/M3)
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: dongming-zhijing
+            asset_name: dongming-zhijing-macos-arm64
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. 安装 Rust 工具链 (使用 dtolnay 的 action 速度更快且稳定)
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # 3. 缓存 Cargo 依赖 (大幅提升后续编译速度)
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # 4. 执行 Release 编译
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # 5. 重命名编译产物 (方便用户区分不同平台的二进制文件)
+      # Linux / macOS 适用 bash
+      - name: Rename binary (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          mv target/${{ matrix.target }}/release/${{ matrix.artifact_name }} target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+          
+      # Windows 适用 PowerShell
+      - name: Rename binary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          mv target\${{ matrix.target }}\release\${{ matrix.artifact_name }} target\${{ matrix.target }}\release\${{ matrix.asset_name }}
+
+      # 6. 上传到 GitHub Release
+      - name: Upload binaries to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
